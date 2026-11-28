@@ -1,0 +1,92 @@
+From 4c74551eca26f849cf025ef951f1a18c2fe4d289 Mon Sep 17 00:00:00 2001
+From: jgrizon
+Date: Fri, 27 Nov 2026 20:18:27 +0100
+Subject: [PATCH] gpu: a queue's earlier segments run before its next memory
+ wait is tested
+
+Port of the checkpoint's queue wait order fix (Kolkka, VIctory-macOS PR #434,
+checkpoint patch 0016) to the held-work pump of the performance recipe. A
+wait read memory that a piece of the same queue still owed, so a wait the
+piece would have set back could pass early. The title's cross-queue barrier
+then never signaled and the Series S intro crashed in Prestream.
+
+The held-head test now expects the earlier piece to have run before the
+wait is tested, so it is no longer in the list of what runs next.
+
+Pinned save, release, play preset, 24 GB M5 Pro, CrossOver 26.3 with
+D3DMetal 3.0: without it 2 of 4 runs crashed in Prestream; with it, 3
+crashes in 20 runs. Frame time unchanged (297-303 ms median over world
+minutes 2-6, against 289-332 without).
+---
+  crates/victory-gpu/src/hold.rs | 35 +++++++++++++++++++++++++++++++----
+  1 file changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/crates/victory-gpu/src/hold.rs b/crates/victory-gpu/src/hold.rs
+index d95327a..1f59415 100644
+--- a/crates/victory-gpu/src/hold.rs
++++ b/crates/victory-gpu/src/hold.rs
+@@ -159,6 +159,13 @@ impl<S> Held<S> {
+                     let ready = match behind.next() {
+                         None => false,
+                         Some((Item::Segment(head, waits), since, fresh)) => {
++                            // Earlier segments of this queue run before its
++                            // waits are tested: their bottom-of-pipe writes
++                            // can change what the waits read.
++                            if !waits.is_empty() && !piece.is_empty() {
++                                (w.run)(*queue, std::mem::take(&mut piece));
++                                done.pieces += 1;
++                            }
+                             let mut ok = true;
+                             for wait in waits.iter() {
+                                 match wait.holds(w.read) {
+@@ -354,6 +361,25 @@ mod tests {
+         assert_eq!(w(EQUAL, 5).holds(&|_, _| None), None, "unreadable memory");
+     }
+ 
++    /// A wait is tested after the earlier segments of its own queue ran:
++    /// one that sets the value back holds the next segment's wait.
++    #[test]
++    fn a_wait_reads_what_earlier_segments_of_its_queue_wrote() {
++        let fake = RefCell::new(Fake::default());
++        fake.borrow_mut().memory.insert(0x100, 1);
++        fake.borrow_mut().writes.insert("reset", vec![(0x100, 0)]);
++        let eq = |reference| ValueWait { address: 0x100, bytes: 8, comparison: EQUAL, reference, mask: u64::MAX };
++        let mut held = Held::default();
++        held.push(1, Item::Segment("reset", vec![]));
++        held.push(1, Item::Segment("after", vec![eq(1)]));
++        pump(&mut held, &fake);
++        assert_eq!(fake.borrow().log, ["q1: reset"], "the wait reads the 0 the reset wrote");
++        assert!(held.holds_work(1));
++        fake.borrow_mut().memory.insert(0x100, 1);
++        pump(&mut held, &fake);
++        assert_eq!(fake.borrow().log, ["q1: reset", "q1: after"]);
++    }
++
+     #[test]
+     fn a_wait_reads_the_bytes_of_its_value_only() {
+         let w = ValueWait { address: 0x100, bytes: 4, comparison: EQUAL, reference: 1, mask: 0xffff_ffff };
+@@ -425,8 +451,8 @@ mod tests {
+     }
+ 
+     /// A head whose wait does not hold is told what runs with it once it
+-    /// does: the piece gathered before it, itself, and the segments behind
+-    /// it up to the next one that waits.
++    /// does: itself and the segments behind it up to the next one that
++    /// waits (the piece gathered before it already ran).
+     #[test]
+     fn a_held_head_knows_what_runs_next() {
+         let fake = RefCell::new(Fake::default());
+@@ -437,8 +463,9 @@ mod tests {
+         held.push(2, Item::Segment("d", vec![ge(0x200, 1)]));
+         held.push(2, Item::Segment("e", vec![]));
+         pump(&mut held, &fake);
+-        // Asked twice: with the piece before it, and again once that ran.
+-        assert_eq!(fake.borrow().next, [vec!["a", "b", "c"], vec!["b", "c"]]);
++        // The piece before it ran first, so it is not in the list; asked
++        // once per pass (the pass that ran `a` moved, so there is another).
++        assert_eq!(fake.borrow().next, [vec!["b", "c"], vec!["b", "c"]]);
+         assert_eq!(fake.borrow().log, ["q2: a"]);
+         // Held again with nothing gathered before it; a Signal ends the run.
+         let mut held = Held::default();
+-- 
+2.50.1

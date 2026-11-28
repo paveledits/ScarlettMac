@@ -28,3 +28,4 @@
 0028-gpu-the-builder-s-exchange-rests-on-the-wave-path-as.patch
 0029-Launcher-run-the-title-s-BVH-builder-and-use-its-own.patch
 0030-Lighting-presets.patch
+0031-gpu-a-queue-s-earlier-segments-run-before-its-next-memory-wait.patch
