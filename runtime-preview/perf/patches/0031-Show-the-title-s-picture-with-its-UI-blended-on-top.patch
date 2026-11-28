@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MiniBandit <194791386+MiniBandit@users.noreply.github.com>
+Date: Sat, 28 Nov 2026 13:28:43 +0000
+Subject: [PATCH] Show the title's picture with its UI blended on top
+
+The title presents two planes: its 3D picture, and a 4K plane with the UI
+that the console draws over it. With neither setting, the larger plane is
+shown, so the window showed the UI alone and stayed black through the
+opening cutscene, behind the subtitles, while the frames held thousands
+of draws. play-main-mac.sh now defaults to plane 0 with the UI blended
+over it (VICTORY_PRESENT_PLANE=0, VICTORY_PRESENT_COMPOSITE=1), as the
+November 27 controls trial set by hand. A setting exported first still
+wins.
+---
+ tools/macos/play-main-mac.sh | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tools/macos/play-main-mac.sh b/tools/macos/play-main-mac.sh
+index f7b5a28..9ae9698 100755
+--- a/tools/macos/play-main-mac.sh
++++ b/tools/macos/play-main-mac.sh
+@@ -40,6 +40,11 @@ d VICTORY_DESCRIPTOR_AS_DATA 1
+ # Measured Nov 27, world frames per 120 s: 18 -> ~265, 4 -> 363/497, 6 -> 522/508/508, 8 -> 482/514/474/509;
+ # p95 2 s -> 0.3-0.4 s. 6 grows swap least (+90-350 MB vs +400-1100 MB at 8).
+ d VICTORY_DSTORAGE_WORKERS 6
++# The title presents two planes: its 3D picture, and a 4K plane with the UI
++# that the console draws over it. Show plane 0, the picture, with the UI
++# blended on top. Otherwise the larger plane, the UI alone, is shown, and
++# cutscenes and much of the world are black behind the subtitles and HUD.
++d VICTORY_PRESENT_PLANE 0;        d VICTORY_PRESENT_COMPOSITE 1
+ # Presses Enter on the first screens (20, 30 and 40 s in). Set VICTORY_KEYS= to turn it off.
+ d VICTORY_KEYS 20:Enter,30:Enter,40:Enter
+ # Faster, lower resolution: VICTORY_OUTPUT=1920x1080
+-- 
+2.54.0 (Apple Git-157)
+
